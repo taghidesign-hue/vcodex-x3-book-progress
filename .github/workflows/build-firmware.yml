@@ -1,0 +1,56 @@
+name: Build Xteink X3 firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "patches/**"
+      - ".github/workflows/build-firmware.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout this project
+        uses: actions/checkout@v4
+
+      - name: Checkout CPR-vCodex source
+        uses: actions/checkout@v4
+        with:
+          repository: franssjz/cpr-vcodex
+          ref: master
+          path: upstream
+
+      - name: Check and apply page-counter patch
+        working-directory: upstream
+        run: |
+          git apply --check ../patches/vcodex-x3-book-page-counter.patch
+          git apply ../patches/vcodex-x3-book-page-counter.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install pioarduino Core
+        run: python -m pip install --upgrade pioarduino
+
+      - name: Build X3/X4 ESP32-C3 release firmware
+        working-directory: upstream
+        env:
+          VCODEX_RELEASE_DRY_RUN: "1"
+        run: pio run -e gh_release -j 2
+
+      - name: Upload firmware artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcodex-x3-book-progress-firmware
+          path: upstream/artifacts/*.bin
+          if-no-files-found: error
+          retention-days: 14
