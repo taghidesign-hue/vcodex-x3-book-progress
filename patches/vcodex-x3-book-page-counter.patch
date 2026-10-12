@@ -1,0 +1,67 @@
+--- a/src/activities/reader/EpubReaderActivity.cpp
++++ b/src/activities/reader/EpubReaderActivity.cpp
+@@ -2706,11 +2706,35 @@
+     return;
+   }
+ 
+-  // Calculate progress in book
+-  const int currentPage = section->currentPage + 1;
+-  const float pageCount = section->estimatedTotalPages();
+-  const float sectionChapterProg = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) : 0;
+-  const float bookProgress = epub->calculateProgress(currentSpineIndex, sectionChapterProg) * 100;
++  // Calculate progress in book. EPUB renderers paginate each spine item
++  // independently, so the reader has no exact global page index until every
++  // section has been laid out. Keep a stable whole-book estimate based on the
++  // first completed section, then map the book's byte-weighted progress onto it.
++  const int chapterPage = section->currentPage + 1;
++  const int chapterPageCount = section->estimatedTotalPages();
++  const float sectionChapterProg =
++      (chapterPageCount > 0) ? (static_cast<float>(chapterPage) / chapterPageCount) : 0.0f;
++  const float bookProgress = epub->calculateProgress(currentSpineIndex, sectionChapterProg) * 100.0f;
++
++  if (estimatedBookPageCount == 0 && chapterPageCount > 0 && !section->isBuilding()) {
++    const size_t bookSize = epub->getBookSize();
++    const size_t cumulativeSize = epub->getCumulativeSpineItemSize(currentSpineIndex);
++    const size_t previousSize = currentSpineIndex > 0
++                                    ? epub->getCumulativeSpineItemSize(currentSpineIndex - 1)
++                                    : 0;
++    const size_t chapterSize = cumulativeSize >= previousSize ? cumulativeSize - previousSize : 0;
++    if (bookSize > 0 && chapterSize > 0) {
++      const double estimated = static_cast<double>(chapterPageCount) *
++                               static_cast<double>(bookSize) / static_cast<double>(chapterSize);
++      estimatedBookPageCount = static_cast<int>(std::clamp<double>(estimated, chapterPageCount, 32767.0));
++    }
++  }
++
++  const int totalBookPages = estimatedBookPageCount > 0 ? estimatedBookPageCount : chapterPageCount;
++  const int currentBookPage = totalBookPages > 0
++                                  ? std::clamp(static_cast<int>(bookProgress * totalBookPages / 100.0f) + 1,
++                                               1, totalBookPages)
++                                  : chapterPage;
+ 
+   std::string title;
+   int textYOffset = 0;
+@@ -2739,8 +2763,8 @@
+     title = epub->getTitle();
+   }
+ 
+-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, currentPageBookmarked,
+-                    section->isBuilding());
++  GUI.drawStatusBar(renderer, bookProgress, currentBookPage, totalBookPages, title, 0, textYOffset, true,
++                    currentPageBookmarked, estimatedBookPageCount > 0 || section->isBuilding());
+ }
+ 
+ void EpubReaderActivity::renderSectionLoadFailure() {
+--- a/src/activities/reader/EpubReaderActivity.h
++++ b/src/activities/reader/EpubReaderActivity.h
+@@ -41,6 +41,10 @@
+   int pagesUntilFullRefresh = 0;
+   int cachedSpineIndex = 0;
+   int cachedChapterTotalPageCount = 0;
++  // Stable per-open estimate of the whole EPUB page count. EPUB pagination is
++  // section-local, so this is inferred from the first fully laid-out section
++  // and the section's share of the book bytes.
++  int estimatedBookPageCount = 0;
+   // Content offset of the page being shown when the layout last changed
+   // (settings, orientation, rebuild) or as read from progress.bin. Preferred
+   // over the page-count ratio when the chapter is re-paginated (upstream);
