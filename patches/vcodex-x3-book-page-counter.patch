@@ -61,7 +61,7 @@
 +  // Stable per-open estimate of the whole EPUB page count. EPUB pagination is
 +  // section-local, so this is inferred from the first fully laid-out section
 +  // and the section's share of the book bytes.
-+  int estimatedBookPageCount = 0;
++  mutable int estimatedBookPageCount = 0;
    // Content offset of the page being shown when the layout last changed
    // (settings, orientation, rebuild) or as read from progress.bin. Preferred
    // over the page-count ratio when the chapter is re-paginated (upstream);
